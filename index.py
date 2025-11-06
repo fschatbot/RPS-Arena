@@ -3,6 +3,8 @@ import random
 from datetime import datetime
 from math import pi, cos, sin
 from matplotlib import pyplot as plt
+from matplotlib.animation import FFMpegWriter
+from tqdm import tqdm
 
 class GameUniverse:
 	def __init__(self, strategies):
@@ -14,11 +16,11 @@ class GameUniverse:
 
 		self.config = {
 			'amount': 300,
-			'clustering': 40,
+			'clustering': -1,
 			'dpi': 200,
 			'stochasticity': 0.01, # Amount of randomness in movement
 			'win_edge': 0.5, # 0.5 + win_edge equals the chance for predator to win
-			'edge_behavior': 'bounce', # 'wrap' or 'bounce'
+			'edge_behavior': 'wrap', # 'wrap' or 'bounce'
 			'max_speed': 5,
 		}
 
@@ -26,6 +28,11 @@ class GameUniverse:
 
 		# Sanity checks
 		assert len(self.strategies) == 3, "There must be exactly three strategies"
+		assert self.config['edge_behavior'] in ['wrap', 'bounce'], "Edge behavior must be 'wrap' or 'bounce'"
+		assert self.config['amount'] > 0, "Amount must be positive"
+		assert self.config['max_speed'] > 0, "Max speed must be positive"
+		assert self.config['stochasticity'] >= 0, "Stochasticity must be non-negative"
+		assert 0 <= self.config['win_edge'] <= 0.5, "Win edge must be between 0 and 0.5"
 
 	def populate(self):
 		assert self.config['amount'] % 3 == 0, "Amount must be divisible by 3"
@@ -114,23 +121,22 @@ class GameUniverse:
 		
 		self.steps += 1
 
-	def draw(self):
-		# Draw all of the objects as scatter plots and export them into the exports folder
-		plt.figure(figsize=(self.width / self.config['dpi'], self.height / self.config['dpi']), dpi=self.config['dpi'])
+	def is_victory(self) -> bool:
+		types_present = set(obj['type'] for obj in self.objects)
+		return len(types_present) == 1
+
+	def draw(self, ax):
+		ax.clear()
 		# Scatter plot each object based on its type
 		for obj_type in range(3):
 			xs = [obj['position'][0] for obj in self.objects if obj['type'] == obj_type]
 			ys = [obj['position'][1] for obj in self.objects if obj['type'] == obj_type]
-			plt.scatter(xs, ys, c=['red', 'blue', 'green'][obj_type], label=['rock', 'paper', 'scissors'][obj_type], s=self.radius)
+			ax.scatter(xs, ys, c=['red', 'blue', 'green'][obj_type], label=['rock', 'paper', 'scissors'][obj_type], s=self.radius)
 		# legend on top right
-		plt.legend(loc='upper right')
-		plt.axis('off')
-		plt.xlim(0, self.width)
-		plt.ylim(0, self.height)
-		padding = 0.01
-		plt.subplots_adjust(left=padding, right=1-padding, top=1-padding, bottom=padding)
-		plt.savefig(f"exports/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.steps}.png")
-		plt.close()
+		ax.legend(loc='upper right')
+		# ax.axis('off')
+		ax.set_xlim(0, self.width)
+		ax.set_ylim(0, self.height)
 
 def chasing(current, surroundings):
 	# Implement chasing behavior
@@ -153,7 +159,7 @@ def weighted_chasing(current, surroundings):
 	# Implement weighted chasing behavior
 	# +2 weight for prey, -1 weight for same type, -2 weight for predator
 	move_x, move_y = 0, 0
-	weight_map = {current['type']: 0, (current['type'] + 1) % 3: -2, (current['type'] + 2) % 3: 2}
+	weight_map = {current['type']: -1, (current['type'] + 1) % 3: -2, (current['type'] + 2) % 3: 2}
 	for obj in surroundings:
 		dx = obj['position'][0] - current['position'][0]
 		dy = obj['position'][1] - current['position'][1]
@@ -166,9 +172,23 @@ def weighted_chasing(current, surroundings):
 	return (move_x / mag, move_y / mag) if mag > 0 else (0, 0)
 
 
-uni = GameUniverse([chasing, weighted_chasing, weighted_chasing])
-uni.populate()
-uni.draw()
-for _ in range(1_000):
-	uni.step()
-	uni.draw()
+universe = GameUniverse([weighted_chasing, weighted_chasing, weighted_chasing])
+universe.populate()
+
+fig, ax = plt.subplots(figsize=(universe.width / universe.config['dpi'], universe.height / universe.config['dpi']), dpi=universe.config['dpi'])
+padding = 0.01
+plt.subplots_adjust(left=padding, right=1-padding, top=1-padding, bottom=padding)
+writer = FFMpegWriter(fps=24, bitrate=4000)
+output_name = f"exports/simulation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+
+with writer.saving(fig, output_name, dpi=universe.config['dpi']):
+	progress = tqdm(desc="Simulating", unit="step")
+	while not universe.is_victory():
+		universe.step()
+		universe.draw(ax)
+		progress.update(1)
+		writer.grab_frame()
+	progress.close()
+
+plt.close(fig)
+print(f"Exported: {output_name}")
