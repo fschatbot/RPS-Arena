@@ -5,10 +5,10 @@ from math import pi, cos, sin
 from matplotlib import pyplot as plt
 from matplotlib.animation import FFMpegWriter
 from tqdm import tqdm
+import numpy as np
 
 class GameUniverse:
 	def __init__(self, strategies):
-		self.objects = [] # {'position': (x, y), 'velocity': (vx, vy), 'type': type} where type is 0: rock, 1: paper, 2: scissors
 		self.strategies = strategies
 		self.radius = 10
 		self.width = 800
@@ -20,9 +20,10 @@ class GameUniverse:
 			'dpi': 200,
 			'stochasticity': 0.01, # Amount of randomness in movement
 			'win_edge': 0.5, # 0.5 + win_edge equals the chance for predator to win
-			'edge_behavior': 'wrap', # 'wrap' or 'bounce'
+			'edge_behavior': 'bounce', # 'wrap' or 'bounce'
 			'max_speed': 5,
 		}
+		self.objects = np.zeros((self.config['amount'], 5)) # [x, y, vx, vy, type] where type is 0: rock, 1: paper, 2: scissors
 
 		self.steps = 0
 
@@ -33,6 +34,7 @@ class GameUniverse:
 		assert self.config['max_speed'] > 0, "Max speed must be positive"
 		assert self.config['stochasticity'] >= 0, "Stochasticity must be non-negative"
 		assert 0 <= self.config['win_edge'] <= 0.5, "Win edge must be between 0 and 0.5"
+		assert self.width * self.height >= self.config['amount'] * (self.radius ** 2) * pi, "Area too small for the number of objects"
 
 	def populate(self):
 		assert self.config['amount'] % 3 == 0, "Amount must be divisible by 3"
@@ -49,88 +51,81 @@ class GameUniverse:
 				x = random.randint(0, self.width)
 				y = random.randint(0, self.height)
 
-			self.objects.append({
-				'position': (min(max(x, self.radius), self.width - self.radius), min(max(y, self.radius), self.height - self.radius)),
-				'velocity': (0, 0),
-				'type': i % 3,
-			})
+			x = min(max(x, self.radius), self.width - self.radius)
+			y = min(max(y, self.radius), self.height - self.radius)
+			self.objects[i] = [x, y, 0, 0, i % 3]
 
 	def step(self):
-		assert len(self.objects) == self.config['amount'], "Object count mismatch"
+		assert self.objects.shape == (self.config['amount'], 5), "Object count mismatch"
 		# Simulatenously calculate the decision of all objects based on their strategies
-		updates = []
-		for obj in self.objects:
-			surroundings = [other for other in self.objects if other != obj]
-			acc_x, acc_y = self.strategies[obj['type']](obj, surroundings)
-			acc_x += (2 * random.random() - 1) * self.config['stochasticity']
-			acc_y += (2 * random.random() - 1) * self.config['stochasticity']
-			mag = (acc_x ** 2 + acc_y ** 2) ** 0.5
-			if mag > 1:
-				acc_x /= mag
-				acc_y /= mag
-			updates.append((acc_x, acc_y))
+		updates = np.zeros((self.config['amount'], 2)) # Acceleration updates
+		for i in range(self.config['amount']):
+			# Gather entities that are not self
+			surroundings = self.objects[np.arange(self.config['amount']) != i]
+			acc_x, acc_y = self.strategies[int(self.objects[i, 4])](self.objects[i], surroundings)
+			updates[i] = (acc_x, acc_y)
 		
-		# Apply the updates
-		for (new_ax, new_ay), obj in zip(updates, self.objects):
-			new_vx, new_vy = (obj['velocity'][0] + new_ax, obj['velocity'][1] + new_ay)
-			# Limit speed
-			speed = (new_vx ** 2 + new_vy ** 2) ** 0.5
-			if speed > self.config['max_speed']:
-				new_vx = (new_vx / speed) * self.config['max_speed']
-				new_vy = (new_vy / speed) * self.config['max_speed']
-			
-			# Update position
-			new_x, new_y = (obj['position'][0] + new_vx, obj['position'][1] + new_vy)
+		# Add stochasticity to acceleration
+		updates += np.random.uniform(-self.config['stochasticity'], self.config['stochasticity'], updates.shape)
+		mag = np.linalg.norm(updates, axis=1)
+		updates[mag > 1] /= mag[mag > 1][:, np.newaxis]
 
-			# Handle edge behavior
-			if self.config['edge_behavior'] == 'wrap':
-				new_x = new_x % self.width
-				new_y = new_y % self.height
-			elif self.config['edge_behavior'] == 'bounce':
-				if new_x < self.radius or new_x > self.width - self.radius:
-					new_vx = -new_vx
-					new_x = min(max(new_x, self.radius + 1e-6), self.width - self.radius - 1e-6)
-				if new_y < self.radius or new_y > self.height - self.radius:
-					new_vy = -new_vy
-					new_y = min(max(new_y, self.radius + 1e-6), self.height - self.radius - 1e-6)
-			
-			obj['position'] = (new_x, new_y)
-			obj['velocity'] = (new_vx, new_vy)
+		# Apply acceleration to velocity
+		self.objects[:, 2:4] += updates
+		mag = np.linalg.norm(self.objects[:, 2:4], axis=1)
+		self.objects[mag > self.config['max_speed'], 2:4] /= mag[mag > self.config['max_speed']][:, np.newaxis]
+
+		# Apply velocity to position
+		self.objects[:, :2] += self.objects[:, 2:4]
+		# Handle edge behavior
+		if self.config['edge_behavior'] == 'wrap':
+			self.objects[:, 0] %= self.width
+			self.objects[:, 1] %= self.height
+		elif self.config['edge_behavior'] == 'bounce':
+			# Multiply velocity by -1 if hitting edge
+			self.objects[(self.objects[:, 0] < self.radius) | (self.objects[:, 0] > self.width - self.radius), 2] *= -1
+			self.objects[(self.objects[:, 1] < self.radius) | (self.objects[:, 1] > self.height - self.radius), 3] *= -1
+			# Correct position if out of bounds
+			self.objects[:, 0] = np.clip(self.objects[:, 0], self.radius + 1e-9, self.width - self.radius - 1e-9)
+			self.objects[:, 1] = np.clip(self.objects[:, 1], self.radius + 1e-9, self.height - self.radius - 1e-9)
 		
 		# Handle interactions
-		for i in range(len(self.objects)):
-			for j in range(i + 1, len(self.objects)):
-				obj_a = self.objects[i]
-				obj_b = self.objects[j]
-				if obj_a['type'] == obj_b['type']: continue # Nothing will happen
-				dx = obj_a['position'][0] - obj_b['position'][0]
-				dy = obj_a['position'][1] - obj_b['position'][1]
-				distance = (dx ** 2 + dy ** 2) ** 0.5
-				if distance > self.radius: continue
+		positions = self.objects[:, :2]
+		types = self.objects[:, 4].astype(int)
+		diff = positions[:, None, :] - positions[None, :, :]
+		dist_sq = np.sum(diff**2, axis=-1)
+		distances = np.sqrt(dist_sq)
 
-				win_chance = 0.5
-				if (obj_a['type'] + 1) % 3 == obj_b['type']: win_chance -= self.config['win_edge']
-				else: win_chance += self.config['win_edge']
-
-				if random.random() < win_chance:
-					# A wins
-					obj_b['type'] = obj_a['type']
-				else:
-					# B wins
-					obj_a['type'] = obj_b['type']
-		
+		mask = np.triu(distances <= self.radius, k=1)  # only upper triangle
+		i_idx, j_idx = np.where(mask)
+		for i, j in zip(i_idx, j_idx):
+			type_a = types[i]
+			type_b = types[j]
+			if type_a == type_b: continue # Nothing will happen
+			win_chance = 0.5
+			if (type_a + 1) % 3 == type_b: win_chance -= self.config['win_edge']
+			else: win_chance += self.config['win_edge']
+			if random.random() < win_chance:
+				# A wins
+				types[j] = type_a
+			else:
+				# B wins
+				types[i] = type_b
+		self.objects[:, 4] = types
+	
 		self.steps += 1
 
 	def is_victory(self) -> bool:
-		types_present = set(obj['type'] for obj in self.objects)
-		return len(types_present) == 1
+		# Can be sped up here by interloop termination
+		unique_types = np.unique(self.objects[:, 4])
+		return len(unique_types) == 1
 
 	def draw(self, ax):
 		ax.clear()
 		# Scatter plot each object based on its type
 		for obj_type in range(3):
-			xs = [obj['position'][0] for obj in self.objects if obj['type'] == obj_type]
-			ys = [obj['position'][1] for obj in self.objects if obj['type'] == obj_type]
+			xs = self.objects[self.objects[:, 4] == obj_type, 0]
+			ys = self.objects[self.objects[:, 4] == obj_type, 1]
 			ax.scatter(xs, ys, c=['red', 'blue', 'green'][obj_type], label=['rock', 'paper', 'scissors'][obj_type], s=self.radius)
 		# legend on top right
 		ax.legend(loc='upper right')
@@ -138,41 +133,34 @@ class GameUniverse:
 		ax.set_xlim(0, self.width)
 		ax.set_ylim(0, self.height)
 
-def chasing(current, surroundings):
-	# Implement chasing behavior
-	best_target = None
-	best_distance = float('inf')
-
-	for obj in surroundings:
-		if (obj['type'] + 1) % 3 != current['type']:  continue  # Only chase the type that current can defeat
-		dx = obj['position'][0] - current['position'][0]
-		dy = obj['position'][1] - current['position'][1]
-		distance = (dx ** 2 + dy ** 2) ** 0.5
-		if distance < best_distance:
-			best_distance = distance
-			best_target = (dx, dy)
-	
-	return best_target if best_target is not None else (0, 0) # Normalize to unit vector
+def chasing(current:np.ndarray, surroundings:np.ndarray):
+	prey = surroundings[(surroundings[:, 4] == (current[4] + 1) % 3)] # Only look for preys
+	vec = prey[:, :2] - current[:2] # Vectors to all prey
+	mag = np.linalg.norm(vec, axis=1) # Distances to all objects
+	best = np.argmin(mag) if len(mag) > 0 else None
+	return vec[best] / mag[best] if best is not None else (0, 0) # Normalize to unit vector
 
 
 def weighted_chasing(current, surroundings):
-	# Implement weighted chasing behavior
-	# +2 weight for prey, -1 weight for same type, -2 weight for predator
-	move_x, move_y = 0, 0
-	weight_map = {current['type']: -1, (current['type'] + 1) % 3: -2, (current['type'] + 2) % 3: 2}
-	for obj in surroundings:
-		dx = obj['position'][0] - current['position'][0]
-		dy = obj['position'][1] - current['position'][1]
-		distance = (dx ** 2 + dy ** 2) ** 0.5 + 1e-9  # Avoid division by zero
-		weight = weight_map.get(obj['type'], 0) / distance
-		move_x += weight * (dx / distance)
-		move_y += weight * (dy / distance)
-
-	mag = (move_x ** 2 + move_y ** 2) ** 0.5
-	return (move_x / mag, move_y / mag) if mag > 0 else (0, 0)
+	weight_map = {current[4]: -1, (current[4] + 1) % 3: -2, (current[4] + 2) % 3: 2}
+	diff = surroundings[:, :2] - current[:2]
+	distances = np.linalg.norm(diff, axis=1)**2 + 1e-9
+	diff /= distances[:, np.newaxis]
+	# Apply weights
+	weights = np.array([weight_map[int(obj[4])] for obj in surroundings])
+	diff *= weights[:, np.newaxis]
+	move = np.sum(diff, axis=0)
+	mag = np.linalg.norm(move)
+	return (move / mag) if mag > 0 else (0, 0)
 
 
 universe = GameUniverse([weighted_chasing, weighted_chasing, weighted_chasing])
+universe.populate()
+progress = tqdm(desc="Simulating", unit="step")
+while not universe.is_victory():
+	universe.step()
+	progress.update(1)
+progress.close()
 universe.populate()
 
 fig, ax = plt.subplots(figsize=(universe.width / universe.config['dpi'], universe.height / universe.config['dpi']), dpi=universe.config['dpi'])
