@@ -1,3 +1,7 @@
-matplotlib
+psutil
+tqdm
 numpy
-pygame
+scipy
+numba
+Pillow
+ffmpeg-python

@@ -1,9 +1,6 @@
 # ATTEMPTING HIGH PRIORITY MANUVER
 import psutil, os
 
-from py import process
-
-
 p = psutil.Process(os.getpid())
 p.nice(psutil.REALTIME_PRIORITY_CLASS)
 print('Process priority upgraded to Realtime!!')
@@ -30,7 +27,7 @@ class GameUniverse:
 			'amount': 300,
 			'clustering': 40,
 			'dpi': 200,
-			'stochasticity': 0.01, # Amount of randomness in movement
+			'stochasticity': 0.00, # Amount of randomness in movement
 			'win_edge': 0.5, # 0.5 + win_edge equals the chance for predator to win
 			'edge_behavior': 'bounce', # 'wrap' or 'bounce'
 			'max_speed': 5,
@@ -263,7 +260,7 @@ def njit_weighted_chasing(current: np.ndarray, surroundings: np.ndarray, i: int)
 		t = int(surroundings[j, 4])
 		d = (t - cur_type) % 3
 		if d == 0:
-			weights[j] = 0.0
+			weights[j] = -0.5
 		elif d == 1:
 			weights[j] = -2.0
 		else:
