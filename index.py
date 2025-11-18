@@ -45,6 +45,10 @@ class GameUniverse:
 		assert 0 <= self.config['win_edge'] <= 0.5, "Win edge must be between 0 and 0.5"
 		assert self.width * self.height >= self.config['amount'] * (self.radius ** 2) * pi, "Area too small for the number of objects"
 
+		asset_paths = {0: "assets/rock.png", 1: "assets/paper.png", 2: "assets/scissor.png"}
+		self.assets = {k: Image.open(v).convert("RGBA") for k, v in asset_paths.items()}
+		self.assets = {k: v.resize((2 * self.radius, 2 * self.radius), Image.Resampling.LANCZOS) for k, v in self.assets.items()}
+
 	def populate(self):
 		assert self.config['amount'] % 3 == 0, "Amount must be divisible by 3"
 		for i in range(self.config['amount']):
@@ -210,30 +214,18 @@ class GameUniverse:
 		return len(unique_types) == 1
 
 	def draw(self):
-		# Create blank RGB image
-		img = Image.new("RGB", (self.width, self.height), (255, 255, 255))
-		draw = ImageDraw.Draw(img)
+		img = Image.new("RGB", (self.width, self.height), (255, 255, 255))		
 
-		colors = {
-			0: (255, 0, 0),     # rock = red
-			1: (0, 0, 255),     # paper = blue
-			2: (0, 255, 0)      # scissors = green
-		}
-
-		# Draw each object as a circle
 		for obj in self.objects:
 			x, y, _, _, obj_type = obj
 			r = self.radius
-			color = colors[obj_type]
-
-			# Pillow circles use bounding box
-			draw.ellipse(
-				(x - r, y - r, x + r, y + r),
-				fill=color,
-				outline=None
-			)
-
-		return img   # return Pillow image
+			sprite = self.assets[int(obj_type)]
+			# Rotate the sprite based on velocity direction
+			vel_x, vel_y = obj[2], obj[3]
+			angle = np.degrees(np.arctan2(vel_y, vel_x)) if (vel_x != 0) else 0.0
+			rotated_sprite = sprite.rotate(-(angle + 90), resample=Image.Resampling.BICUBIC, expand=False)
+			img.paste(rotated_sprite, (int(x - r), int(y - r)), rotated_sprite)
+		return img
 
 def chasing(current:np.ndarray, surroundings:np.ndarray, i):
 	prey = surroundings[(surroundings[:, 4] == (current[4] + 1) % 3)] # Only look for preys
