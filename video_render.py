@@ -5,11 +5,14 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 import torch.cuda
+import os
 
-MAX_STEPS = 500
+os.makedirs("exports", exist_ok=True)
+MAX_STEPS = 1500
 
 # Create RLStrategy for type 0 (example). Place RLStrategy instance in the strategies list
 rl_for_type0 = RLStrategy(controlled_type=0, use_pretrained=True)
+rl_for_type0.import_model("pretrained_models/checkpoint_game_180.pth")
 
 # Example: type 0 -> RL, type 1 -> njit_weighted_chasing, type 2 -> njit_weighted_chasing
 universe = GameUniverse([rl_for_type0, njit_weighted_chasing, njit_weighted_chasing])

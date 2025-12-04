@@ -15,6 +15,7 @@ MAX_STEPS_PER_GAME = 500
 CONTROLLED_TYPE = 0
 OUTPUT_DIR = "pretrained_models"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs("analytics_exports", exist_ok=True)	
 
 # ------------------------------------------------------------------
 # Initialize RL agent (training mode)
