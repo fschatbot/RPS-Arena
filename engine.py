@@ -21,14 +21,14 @@ class GameUniverse:
 
 		self.config = {
 			'amount': 300,
-			'clustering': 40,
+			'clustering': -1,
 			'dpi': 200,
 			'stochasticity': 0.00,
 			'win_edge': 0.5,
 			'edge_behavior': 'bounce',
 			'max_speed': 5,
 		}
-		self.objects = np.zeros((self.config['amount'], 5))  # [x,y,vx,vy,type]
+		self.objects = np.zeros((self.config['amount'], 5), dtype=np.float32)  # [x,y,vx,vy,type]
 		self.steps = 0
 		self.history = [] # Saves the population history
 
@@ -46,6 +46,7 @@ class GameUniverse:
 		self.assets = {k: v.resize((2 * self.radius, 2 * self.radius), Image.Resampling.LANCZOS) for k, v in self.assets.items()}
 
 	def populate(self):
+		random.seed(42)
 		assert self.config['amount'] % 3 == 0
 		for i in range(self.config['amount']):
 			if self.config['clustering'] > 0:
@@ -69,28 +70,20 @@ class GameUniverse:
 		assert self.objects.shape == (self.config['amount'], 5)
 		N = self.objects.shape[0]
 
-		# Precompute positions & types for RL strategies (full population)
-		positions = self.objects[:, :2].astype(np.float32)
-		types = self.objects[:, 4].astype(np.int64)
-
 		# Prepare a container for updates (accelerations)
 		updates = np.zeros((N, 2), dtype=np.float32)
 
 		# If any strategy slots are RLStrategy, compute actions in batch per RLStrategy instance
-		rl_actions_full = {}  # type_index -> (N,2) actions
 		for t in range(3):
 			strat = self.strategies[t]
 			if hasattr(strat, 'compute_actions'):
-				rl_actions_full[t] = strat.compute_actions(self.objects)
+				updates[self.objects[:, 4] == t] = strat.compute_actions(self.objects)
 
 		# Compute updates per-entity:
 		for i in range(N):
 			t = int(self.objects[i, 4])
 			strat = self.strategies[t]
-			if hasattr(strat, 'compute_actions'):
-				# Use precomputed batched action for this entity
-				updates[i, :] = rl_actions_full[t][i]
-			else:
+			if not hasattr(strat, 'compute_actions'):
 				# Non-RL function: maintain compatibility with signature
 				try:
 					ax, ay = strat(self.objects[i], self.objects, i)
@@ -221,7 +214,7 @@ class GameUniverse:
 			img.paste(rotated_sprite, (int(x - r), int(y - r)), rotated_sprite)
 		return img
 	
-	def render_history(self, path: str = None):
+	def render_history(self, path: str = None, extra: np.array = None):
 		history_array = np.array(self.history)
 		steps = np.arange(history_array.shape[0])
 
@@ -229,6 +222,15 @@ class GameUniverse:
 		plt.plot(steps, history_array[:, 0], label='Rock', color='blue')
 		plt.plot(steps, history_array[:, 1], label='Paper', color='orange')
 		plt.plot(steps, history_array[:, 2], label='Scissor', color='green')
+
+		# Draw the extra on a different axis if provided
+		if extra is not None:
+			ax1 = plt.gca()
+			ax2 = ax1.twinx()
+			ax2.plot(np.arange(len(extra)), np.cumsum(extra), label='RL Reward', color='red', linestyle='--')
+			ax2.set_ylabel('RL Reward')
+			ax2.legend(loc='upper left')
+
 		plt.xlabel('Steps')
 		plt.ylabel('Population Count')
 		plt.title('Population History Over Time')
