@@ -1,3 +1,5 @@
+import matplotlib
+# matplotlib.use('Agg')  # Fast, non-GUI backend
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
@@ -46,7 +48,6 @@ class GameUniverse:
 		self.assets = {k: v.resize((2 * self.radius, 2 * self.radius), Image.Resampling.LANCZOS) for k, v in self.assets.items()}
 
 	def populate(self):
-		random.seed(42)
 		assert self.config['amount'] % 3 == 0
 		for i in range(self.config['amount']):
 			if self.config['clustering'] > 0:
