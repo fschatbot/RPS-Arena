@@ -4,3 +4,4 @@ exports/*
 analytics_exports
 analytics_exports - Copy
 *.prof
+pretrained_models/*
